@@ -78,15 +78,27 @@ body { background: #f5f5f3; min-height: 100vh; }
 .result-badge { font-size: 11px; padding: 2px 8px; border-radius: 20px; font-weight: 500; display: inline-block; margin-top: 4px; }
 
 .dashboard { display: flex; flex-direction: column; gap: 0; }
-.dash-section-title { font-size: 12px; font-weight: 500; color: #888; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
-.dash-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-.dash-card { background: #fff; border-radius: 12px; border: 0.5px solid #e5e5e5; padding: 1rem; }
-.dash-label { font-size: 12px; color: #888; margin-bottom: 4px; }
-.dash-value { font-size: 24px; font-weight: 500; color: #1a1a1a; line-height: 1.2; }
-.dash-sub { font-size: 14px; color: #aaa; font-weight: 400; }
-.dash-bar-wrap { height: 4px; background: #f0f0f0; border-radius: 2px; margin: 8px 0 4px; }
-.dash-bar-fill { height: 4px; border-radius: 2px; transition: width 0.4s; }
-.dash-pct { font-size: 12px; color: #888; }
+.dash-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.dash-section-title { font-size: 12px; font-weight: 500; color: #888; text-transform: uppercase; letter-spacing: 0.05em; }
+.dash-export-btns { display: flex; gap: 8px; }
+.export-btn { font-size: 12px; padding: 5px 13px; border-radius: 8px; border: 0.5px solid #ddd; background: #fff; color: #1a1a1a; cursor: pointer; font-weight: 500; }
+.export-btn:hover { background: #f5f5f3; }
+.export-btn.excel { border-color: #1D9E75; color: #085041; }
+.export-btn.excel:hover { background: #E1F5EE; }
+
+.dash-rings { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px; }
+.dash-ring-card { background: #fff; border-radius: 14px; border: 0.5px solid #e5e5e5; padding: 1.2rem 1.2rem; display: flex; align-items: center; gap: 18px; }
+.ring-big { font-size: 20px; font-weight: 600; color: #1a1a1a; line-height: 1.1; }
+.ring-small { font-size: 11px; color: #aaa; }
+.ring-info { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.ring-title { font-size: 12px; font-weight: 500; color: #888; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 2px; }
+.ring-num { font-size: 22px; font-weight: 500; color: #1a1a1a; line-height: 1.1; }
+.ring-of { font-size: 13px; color: #aaa; font-weight: 400; }
+.ring-diff { font-size: 12px; font-weight: 500; margin-top: 2px; }
+.ring-legend-row { display: flex; align-items: center; gap: 4px; font-size: 11px; color: #888; margin-top: 4px; flex-wrap: wrap; }
+.ring-legend-col { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: #888; margin-top: 4px; }
+.ring-legend-col div { display: flex; align-items: center; gap: 5px; }
+.legend-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
 
 .dash-log { background: #fff; border-radius: 12px; border: 0.5px solid #e5e5e5; overflow: hidden; }
 .dash-log-row { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 0.5px solid #f0f0f0; flex-wrap: wrap; }

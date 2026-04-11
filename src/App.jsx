@@ -1,5 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from './supabase'
+import jsPDF from 'jspdf'
+import autoTable from 'jspdf-autotable'
+import * as XLSX from 'xlsx'
 import './App.css'
 
 const STATUSES = ['overdue', 'today', 'upcoming', 'done']
@@ -325,50 +328,187 @@ function ListView({ byStatus, toggleDone, removeTask, activeTimers, startTimer, 
   )
 }
 
-function DashboardView({ stats, tasks }) {
-  const pct = (n) => Math.round((n / stats.total) * 100)
-  const donePct = Math.round((stats.doneCount / (stats.totalCount || 1)) * 100)
+function DonutChart({ segments, size = 120, strokeWidth = 13, children }) {
+  const r = (size - strokeWidth) / 2
+  const circ = 2 * Math.PI * r
+  const cx = size / 2, cy = size / 2
+  const total = segments.reduce((s, seg) => s + seg.value, 0)
+  let cumAngle = -90
+  return (
+    <div style={{ position: 'relative', width: size, height: size, flexShrink: 0 }}>
+      <svg width={size} height={size}>
+        <circle cx={cx} cy={cy} r={r} fill="none" stroke="#f0f0f0" strokeWidth={strokeWidth} />
+        {total > 0 && segments.filter(s => s.value > 0).map((seg, i) => {
+          const frac = seg.value / total
+          const dash = frac * circ
+          const angle = cumAngle
+          cumAngle += frac * 360
+          return (
+            <circle key={i} cx={cx} cy={cy} r={r} fill="none"
+              stroke={seg.color} strokeWidth={strokeWidth}
+              strokeDasharray={`${dash} ${circ - dash}`}
+              transform={`rotate(${angle} ${cx} ${cy})`}
+            />
+          )
+        })}
+      </svg>
+      {children && (
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
+          {children}
+        </div>
+      )}
+    </div>
+  )
+}
 
+function exportPDF(stats, tasks) {
+  const doc = new jsPDF()
+  const today = new Date().toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
+
+  doc.setFontSize(18)
+  doc.setFont('helvetica', 'bold')
+  doc.text('Task Report', 14, 20)
+  doc.setFontSize(10)
+  doc.setFont('helvetica', 'normal')
+  doc.setTextColor(150)
+  doc.text(`Generated on ${today}`, 14, 28)
+  doc.setTextColor(0)
+
+  doc.setFontSize(12)
+  doc.setFont('helvetica', 'bold')
+  doc.text('Weekly Summary', 14, 42)
+
+  autoTable(doc, {
+    startY: 47,
+    head: [['Metric', 'Value']],
+    body: [
+      ['Tasks completed', `${stats.doneCount} / ${stats.totalCount}`],
+      ['On time', `${stats.onTime} tasks`],
+      ['Early', `${stats.early} tasks`],
+      ['Late', `${stats.late} tasks`],
+      ['Hours planned', `${Math.round(stats.plannedMins / 60 * 10) / 10}h`],
+      ['Hours actual', `${Math.round(stats.actualMins / 60 * 10) / 10}h`],
+    ],
+    theme: 'striped',
+    headStyles: { fillColor: [55, 138, 221] },
+    columnStyles: { 0: { fontStyle: 'bold' } },
+  })
+
+  const y = doc.lastAutoTable.finalY + 14
+  doc.setFontSize(12)
+  doc.setFont('helvetica', 'bold')
+  doc.text('All Tasks', 14, y)
+
+  autoTable(doc, {
+    startY: y + 5,
+    head: [['Task', 'Project', 'Status', 'Date', 'Estimated', 'Actual', 'Result']],
+    body: tasks.map(t => [
+      t.name,
+      t.proj || '—',
+      t.status,
+      t.date ? formatDate(t.date) : '—',
+      t.estimated_minutes ? formatMins(t.estimated_minutes) : '—',
+      t.actual_minutes ? formatMins(t.actual_minutes) : '—',
+      t.time_result ? RESULT_STYLE[t.time_result].label : '—',
+    ]),
+    theme: 'striped',
+    headStyles: { fillColor: [55, 138, 221] },
+    styles: { fontSize: 9 },
+  })
+
+  doc.save('task-report.pdf')
+}
+
+function exportExcel(tasks) {
+  const data = tasks.map(t => ({
+    Task: t.name,
+    Project: t.proj || '',
+    Status: t.status,
+    Date: t.date || '',
+    'Start time': t.start_time || '',
+    'End time': t.end_time || '',
+    'Estimated (min)': t.estimated_minutes || '',
+    'Actual (min)': t.actual_minutes || '',
+    Result: t.time_result ? RESULT_STYLE[t.time_result].label : '',
+  }))
+  const ws = XLSX.utils.json_to_sheet(data)
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, 'Tasks')
+  XLSX.writeFile(wb, 'task-report.xlsx')
+}
+
+function DashboardView({ stats, tasks }) {
+  const donePct = Math.round((stats.doneCount / (stats.totalCount || 1)) * 100)
+  const pct = (n) => Math.round((n / (stats.total || 1)) * 100)
   const recentDone = tasks.filter(t => t.status === 'done' && t.time_result).slice(-10).reverse()
+  const overPct = stats.plannedMins > 0 ? Math.round((stats.actualMins - stats.plannedMins) / stats.plannedMins * 100) : 0
 
   return (
     <div className="dashboard">
-      <div className="dash-section-title">This week</div>
-      <div className="dash-cards">
-        <div className="dash-card">
-          <div className="dash-label">Tasks completed</div>
-          <div className="dash-value">{stats.doneCount}<span className="dash-sub">/ {stats.totalCount}</span></div>
-          <div className="dash-bar-wrap"><div className="dash-bar-fill" style={{ width: `${donePct}%`, background: '#1D9E75' }} /></div>
-          <div className="dash-pct">{donePct}%</div>
+      <div className="dash-header">
+        <div className="dash-section-title">This week</div>
+        <div className="dash-export-btns">
+          <button className="export-btn" onClick={() => exportPDF(stats, tasks)}>↓ PDF</button>
+          <button className="export-btn excel" onClick={() => exportExcel(tasks)}>↓ Excel</button>
         </div>
-        <div className="dash-card">
-          <div className="dash-label">On time</div>
-          <div className="dash-value" style={{ color: '#085041' }}>{stats.onTime}<span className="dash-sub"> tasks</span></div>
-          <div className="dash-bar-wrap"><div className="dash-bar-fill" style={{ width: `${pct(stats.onTime)}%`, background: '#1D9E75' }} /></div>
-          <div className="dash-pct">{pct(stats.onTime)}%</div>
+      </div>
+
+      <div className="dash-rings">
+        <div className="dash-ring-card">
+          <DonutChart segments={[
+            { value: stats.doneCount, color: '#1D9E75' },
+            { value: Math.max(stats.totalCount - stats.doneCount, 0), color: '#e5e5e5' },
+          ]}>
+            <span className="ring-big">{donePct}%</span>
+            <span className="ring-small">done</span>
+          </DonutChart>
+          <div className="ring-info">
+            <div className="ring-title">Completed</div>
+            <div className="ring-num">{stats.doneCount}<span className="ring-of"> / {stats.totalCount}</span></div>
+            <div className="ring-legend-row">
+              <span className="legend-dot" style={{ background: '#1D9E75' }} />Done
+              <span className="legend-dot" style={{ background: '#e5e5e5', marginLeft: 8 }} />Remaining
+            </div>
+          </div>
         </div>
-        <div className="dash-card">
-          <div className="dash-label">Early</div>
-          <div className="dash-value" style={{ color: '#185FA5' }}>{stats.early}<span className="dash-sub"> tasks</span></div>
-          <div className="dash-bar-wrap"><div className="dash-bar-fill" style={{ width: `${pct(stats.early)}%`, background: '#378ADD' }} /></div>
-          <div className="dash-pct">{pct(stats.early)}%</div>
+
+        <div className="dash-ring-card">
+          <DonutChart segments={[
+            { value: stats.early, color: '#378ADD' },
+            { value: stats.onTime, color: '#1D9E75' },
+            { value: stats.late, color: '#E24B4A' },
+          ]}>
+            <span className="ring-big">{pct(stats.onTime + stats.early)}%</span>
+            <span className="ring-small">ok</span>
+          </DonutChart>
+          <div className="ring-info">
+            <div className="ring-title">Time performance</div>
+            <div className="ring-legend-col">
+              <div><span className="legend-dot" style={{ background: '#378ADD' }} /><span>Early — {stats.early}</span></div>
+              <div><span className="legend-dot" style={{ background: '#1D9E75' }} /><span>On time — {stats.onTime}</span></div>
+              <div><span className="legend-dot" style={{ background: '#E24B4A' }} /><span>Late — {stats.late}</span></div>
+            </div>
+          </div>
         </div>
-        <div className="dash-card">
-          <div className="dash-label">Late</div>
-          <div className="dash-value" style={{ color: '#A32D2D' }}>{stats.late}<span className="dash-sub"> tasks</span></div>
-          <div className="dash-bar-wrap"><div className="dash-bar-fill" style={{ width: `${pct(stats.late)}%`, background: '#E24B4A' }} /></div>
-          <div className="dash-pct">{pct(stats.late)}%</div>
-        </div>
-        <div className="dash-card">
-          <div className="dash-label">Hours planned</div>
-          <div className="dash-value">{Math.round(stats.plannedMins / 60 * 10) / 10}<span className="dash-sub">h</span></div>
-        </div>
-        <div className="dash-card">
-          <div className="dash-label">Hours actual</div>
-          <div className="dash-value">{Math.round(stats.actualMins / 60 * 10) / 10}<span className="dash-sub">h</span></div>
-          {stats.plannedMins > 0 && <div className="dash-pct" style={{ color: stats.actualMins > stats.plannedMins ? '#A32D2D' : '#085041' }}>
-            {stats.actualMins > stats.plannedMins ? '+' : ''}{Math.round((stats.actualMins - stats.plannedMins) / 60 * 10) / 10}h vs plan
-          </div>}
+
+        <div className="dash-ring-card">
+          <DonutChart segments={[
+            { value: Math.min(stats.actualMins, stats.plannedMins), color: '#1D9E75' },
+            { value: Math.max(stats.actualMins - stats.plannedMins, 0), color: '#E24B4A' },
+            { value: Math.max(stats.plannedMins - stats.actualMins, 0), color: '#e5e5e5' },
+          ]}>
+            <span className="ring-big">{Math.round(stats.actualMins / 60 * 10) / 10}h</span>
+            <span className="ring-small">actual</span>
+          </DonutChart>
+          <div className="ring-info">
+            <div className="ring-title">Hours</div>
+            <div className="ring-num">{Math.round(stats.plannedMins / 60 * 10) / 10}h<span className="ring-of"> planned</span></div>
+            {stats.plannedMins > 0 && (
+              <div className="ring-diff" style={{ color: stats.actualMins > stats.plannedMins ? '#A32D2D' : '#085041' }}>
+                {stats.actualMins > stats.plannedMins ? `+${overPct}%` : `${overPct}%`} vs plan
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -384,7 +524,7 @@ function DashboardView({ stats, tasks }) {
                   {t.estimated_minutes ? `planned ${formatMins(t.estimated_minutes)}` : ''}
                   {t.actual_minutes ? ` · actual ${formatMins(t.actual_minutes)}` : ''}
                 </span>
-                {t.time_result && <span className="result-badge" style={{ background: RESULT_STYLE[t.time_result].bg, color: RESULT_STYLE[t.time_result].color }}>{RESULT_STYLE[t.time_result].label}</span>}
+                <span className="result-badge" style={{ background: RESULT_STYLE[t.time_result].bg, color: RESULT_STYLE[t.time_result].color }}>{RESULT_STYLE[t.time_result].label}</span>
               </div>
             ))}
           </div>

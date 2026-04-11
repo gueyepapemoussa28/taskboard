@@ -53,16 +53,20 @@ function formatTimer(secs) {
 
 export default function App() {
   const [tasks, setTasks] = useState([])
+  const [projects, setProjects] = useState([])
   const [view, setView] = useState('board')
   const [modal, setModal] = useState(false)
+  const [projModal, setProjModal] = useState(false)
   const [form, setForm] = useState({ name:'', proj:'', description:'', date:'', start_time:'', end_time:'', estimated_minutes:'' })
+  const [newProjInput, setNewProjInput] = useState('')
+  const [addingProj, setAddingProj] = useState(false)
   const [loading, setLoading] = useState(true)
   const [dragId, setDragId] = useState(null)
   const [activeTimers, setActiveTimers] = useState({})
   const [tick, setTick] = useState(0)
   const intervalRef = useRef(null)
 
-  useEffect(() => { fetchTasks() }, [])
+  useEffect(() => { fetchTasks(); fetchProjects() }, [])
 
   useEffect(() => {
     const hasActive = Object.keys(activeTimers).length > 0
@@ -85,6 +89,29 @@ export default function App() {
       setActiveTimers(timers)
     }
     setLoading(false)
+  }
+
+  async function fetchProjects() {
+    const { data } = await supabase.from('projects').select('*').order('name', { ascending: true })
+    if (data) setProjects(data)
+  }
+
+  async function createProject() {
+    const name = newProjInput.trim()
+    if (!name) return
+    const { data, error } = await supabase.from('projects').insert([{ name }]).select()
+    if (error) { alert(`Failed to create project: ${error.message}`); return }
+    if (data) {
+      setProjects(p => [...p, ...data].sort((a,b) => a.name.localeCompare(b.name)))
+      setForm(f => ({ ...f, proj: name }))
+      setNewProjInput('')
+      setAddingProj(false)
+    }
+  }
+
+  async function deleteProject(id) {
+    await supabase.from('projects').delete().eq('id', id)
+    setProjects(p => p.filter(x => x.id !== id))
   }
 
   async function saveTask() {
@@ -187,10 +214,14 @@ export default function App() {
               <button className={`view-btn${view==='dashboard'?' active':''}`} onClick={() => setView('dashboard')}>Dashboard</button>
             </div>
           </div>
-          <button className="add-btn" onClick={() => {
-            setForm({ name:'', proj:'', description:'', date: new Date().toISOString().split('T')[0], start_time:'', end_time:'', estimated_minutes:'' })
-            setModal(true)
-          }}>+ Add task</button>
+          <div style={{ display:'flex', gap:8 }}>
+            <button className="add-btn" onClick={() => setProjModal(true)}>Projects</button>
+            <button className="add-btn" style={{ background:'#378ADD', color:'#fff', borderColor:'#378ADD' }} onClick={() => {
+              setForm({ name:'', proj:'', description:'', date: new Date().toISOString().split('T')[0], start_time:'', end_time:'', estimated_minutes:'' })
+              setAddingProj(false); setNewProjInput('')
+              setModal(true)
+            }}>+ Add task</button>
+          </div>
         </div>
 
         {loading ? <div className="loading">Loading tasks...</div>
@@ -200,12 +231,55 @@ export default function App() {
         }
       </div>
 
+      {projModal && (
+        <div className="modal-bg" onClick={e => e.target.className==='modal-bg' && setProjModal(false)}>
+          <div className="modal">
+            <h3>Projects</h3>
+            <div className="proj-list">
+              {projects.length === 0 && <div className="proj-empty">No projects yet</div>}
+              {projects.map(p => (
+                <div key={p.id} className="proj-row">
+                  <span className="proj-row-name">{p.name}</span>
+                  <button className="del-btn" style={{ position:'static' }} onClick={() => deleteProject(p.id)}>✕</button>
+                </div>
+              ))}
+            </div>
+            <div className="new-proj-row" style={{ marginTop:12 }}>
+              <input type="text" placeholder="New project name" value={newProjInput} onChange={e => setNewProjInput(e.target.value)} onKeyDown={e => e.key==='Enter' && (supabase.from('projects').insert([{name:newProjInput.trim()}]).select().then(({data})=>{ if(data){ setProjects(p=>[...p,...data].sort((a,b)=>a.name.localeCompare(b.name))); setNewProjInput('') }}))} />
+              <button className="btn-save" onClick={async () => {
+                const name = newProjInput.trim(); if(!name) return
+                const { data } = await supabase.from('projects').insert([{name}]).select()
+                if(data){ setProjects(p=>[...p,...data].sort((a,b)=>a.name.localeCompare(b.name))); setNewProjInput('') }
+              }}>Add</button>
+            </div>
+            <div className="modal-actions"><button className="btn-cancel" onClick={() => setProjModal(false)}>Close</button></div>
+          </div>
+        </div>
+      )}
+
       {modal && (
         <div className="modal-bg" onClick={e => e.target.className==='modal-bg' && setModal(false)}>
           <div className="modal">
             <h3>New task</h3>
             <div className="field"><label>Task name</label><input type="text" placeholder="What needs to be done?" value={form.name} onChange={e => setForm(f=>({...f,name:e.target.value}))} autoFocus /></div>
-            <div className="field"><label>Project</label><input type="text" placeholder="e.g. KFC Sénégal" value={form.proj} onChange={e => setForm(f=>({...f,proj:e.target.value}))} /></div>
+            <div className="field">
+              <label>Project</label>
+              {addingProj ? (
+                <div className="new-proj-row">
+                  <input type="text" placeholder="Project name" value={newProjInput} onChange={e => setNewProjInput(e.target.value)} onKeyDown={e => e.key==='Enter' && createProject()} autoFocus />
+                  <button className="btn-save" onClick={createProject}>Add</button>
+                  <button className="btn-cancel" onClick={() => { setAddingProj(false); setNewProjInput('') }}>✕</button>
+                </div>
+              ) : (
+                <div className="proj-select-row">
+                  <select value={form.proj} onChange={e => setForm(f=>({...f,proj:e.target.value}))}>
+                    <option value="">No project</option>
+                    {projects.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
+                  </select>
+                  <button className="btn-new-proj" onClick={() => setAddingProj(true)} title="Create new project">＋</button>
+                </div>
+              )}
+            </div>
             <div className="field"><label>Description (optional)</label><textarea placeholder="A few words..." value={form.description} onChange={e => setForm(f=>({...f,description:e.target.value}))} /></div>
             <div className="field"><label>Deadline</label><input type="date" value={form.date} onChange={e => setForm(f=>({...f,date:e.target.value}))} /></div>
             <div className="field-row">

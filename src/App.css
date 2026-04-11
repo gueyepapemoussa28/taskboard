@@ -62,6 +62,20 @@ body { background: #f5f5f3; min-height: 100vh; }
 .btn-save { font-size: 12px; padding: 6px 14px; border: none; border-radius: 8px; background: #378ADD; color: #fff; cursor: pointer; font-weight: 500; }
 .btn-save:hover { background: #2a6fb5; }
 
+.field select { width: 100%; font-size: 13px; padding: 7px 10px; border: 0.5px solid #ddd; border-radius: 8px; background: #f9f9f8; color: #1a1a1a; outline: none; appearance: none; cursor: pointer; }
+.field select:focus { border-color: #378ADD; }
+.proj-select-row { display: flex; gap: 6px; align-items: center; }
+.proj-select-row select { flex: 1; }
+.btn-new-proj { font-size: 16px; padding: 0 10px; height: 34px; border: 0.5px solid #ddd; border-radius: 8px; background: none; color: #888; cursor: pointer; flex-shrink: 0; }
+.btn-new-proj:hover { background: #f0f0f0; color: #378ADD; }
+.new-proj-row { display: flex; gap: 6px; align-items: center; }
+.new-proj-row input { flex: 1; font-size: 13px; padding: 7px 10px; border: 0.5px solid #ddd; border-radius: 8px; background: #f9f9f8; color: #1a1a1a; outline: none; }
+.new-proj-row input:focus { border-color: #378ADD; }
+.proj-list { display: flex; flex-direction: column; gap: 0; border: 0.5px solid #e5e5e5; border-radius: 8px; overflow: hidden; }
+.proj-row { display: flex; align-items: center; justify-content: space-between; padding: 9px 12px; border-bottom: 0.5px solid #f0f0f0; }
+.proj-row:last-child { border-bottom: none; }
+.proj-row-name { font-size: 13px; color: #1a1a1a; }
+.proj-empty { font-size: 13px; color: #aaa; padding: 10px 12px; }
 .field-row { display: flex; gap: 12px; }
 .field-row .field { flex: 1; }
 .task-meta { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }

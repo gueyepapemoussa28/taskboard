@@ -97,7 +97,8 @@ export default function App() {
       end_time: form.end_time || null,
       estimated_minutes: form.estimated_minutes ? parseInt(form.estimated_minutes) : null,
     }
-    const { data } = await supabase.from('tasks').insert([payload]).select()
+    const { data, error } = await supabase.from('tasks').insert([payload]).select()
+    if (error) { console.error('Insert failed:', error); alert(`Failed to add task: ${error.message}`); return }
     if (data) setTasks(t => [...t, ...data])
     setModal(false)
     setForm({ name:'', proj:'', description:'', date:'', start_time:'', end_time:'', estimated_minutes:'' })

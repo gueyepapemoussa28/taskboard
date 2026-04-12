@@ -183,25 +183,6 @@ export default function App() {
 
   const byStatus = (s) => tasks.filter(t => t.status === s)
 
-  const weekStats = () => {
-    const now = new Date()
-    const weekStart = new Date(now); weekStart.setDate(now.getDate() - now.getDay()); weekStart.setHours(0,0,0,0)
-    const weekTasks = tasks.filter(t => {
-      if (!t.date) return false
-      const d = new Date(t.date)
-      return d >= weekStart && d <= now
-    })
-    const done = weekTasks.filter(t => t.status === 'done')
-    const withResult = done.filter(t => t.time_result)
-    const onTime = withResult.filter(t => t.time_result === 'on_time').length
-    const early = withResult.filter(t => t.time_result === 'early').length
-    const late = withResult.filter(t => t.time_result === 'late').length
-    const plannedMins = weekTasks.reduce((s, t) => s + (t.estimated_minutes || 0), 0)
-    const actualMins = done.reduce((s, t) => s + (t.actual_minutes || 0), 0)
-    const total = withResult.length || 1
-    return { onTime, early, late, plannedMins, actualMins, total, doneCount: done.length, totalCount: weekTasks.length }
-  }
-
   return (
     <div className="app">
       <div className="board">
@@ -227,7 +208,7 @@ export default function App() {
         {loading ? <div className="loading">Loading tasks...</div>
           : view === 'board' ? <BoardView byStatus={byStatus} dragId={dragId} setDragId={setDragId} updateStatus={updateStatus} removeTask={removeTask} activeTimers={activeTimers} startTimer={startTimer} stopTimer={stopTimer} getElapsed={getElapsed} tick={tick} />
           : view === 'list' ? <ListView byStatus={byStatus} toggleDone={toggleDone} removeTask={removeTask} activeTimers={activeTimers} startTimer={startTimer} stopTimer={stopTimer} getElapsed={getElapsed} tick={tick} />
-          : <DashboardView stats={weekStats()} tasks={tasks} />
+          : <DashboardView tasks={tasks} />
         }
       </div>
 
@@ -402,6 +383,67 @@ function ListView({ byStatus, toggleDone, removeTask, activeTimers, startTimer, 
   )
 }
 
+const PERIODS = [
+  { value: 'today', label: 'Today' },
+  { value: 'week', label: 'Week' },
+  { value: 'month', label: 'Month' },
+  { value: 'year', label: 'Year' },
+  { value: 'all', label: 'All time' },
+  { value: 'custom', label: 'Custom' },
+]
+
+function getDateRange(period, customFrom, customTo) {
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  switch (period) {
+    case 'today': return { from: today, to: now }
+    case 'week': {
+      const from = new Date(today)
+      const day = today.getDay()
+      from.setDate(today.getDate() - (day === 0 ? 6 : day - 1))
+      return { from, to: now }
+    }
+    case 'month': return { from: new Date(today.getFullYear(), today.getMonth(), 1), to: now }
+    case 'year': return { from: new Date(today.getFullYear(), 0, 1), to: now }
+    case 'all': return { from: new Date(0), to: now }
+    case 'custom': return {
+      from: customFrom ? new Date(customFrom) : new Date(0),
+      to: customTo ? new Date(customTo + 'T23:59:59') : now,
+    }
+    default: return { from: new Date(0), to: now }
+  }
+}
+
+function getPeriodLabel(period, customFrom, customTo) {
+  switch (period) {
+    case 'today': return 'Today'
+    case 'week': return 'This Week'
+    case 'month': return 'This Month'
+    case 'year': return 'This Year'
+    case 'all': return 'All Time'
+    case 'custom': return `${customFrom ? formatDate(customFrom) : '…'} – ${customTo ? formatDate(customTo) : '…'}`
+    default: return ''
+  }
+}
+
+function getStats(tasks, period, customFrom, customTo) {
+  const { from, to } = getDateRange(period, customFrom, customTo)
+  const periodTasks = tasks.filter(t => {
+    if (!t.date) return period === 'all'
+    const d = new Date(t.date)
+    return d >= from && d <= to
+  })
+  const done = periodTasks.filter(t => t.status === 'done')
+  const withResult = done.filter(t => t.time_result)
+  const onTime = withResult.filter(t => t.time_result === 'on_time').length
+  const early = withResult.filter(t => t.time_result === 'early').length
+  const late = withResult.filter(t => t.time_result === 'late').length
+  const plannedMins = periodTasks.reduce((s, t) => s + (t.estimated_minutes || 0), 0)
+  const actualMins = done.reduce((s, t) => s + (t.actual_minutes || 0), 0)
+  const total = withResult.length || 1
+  return { onTime, early, late, plannedMins, actualMins, total, doneCount: done.length, totalCount: periodTasks.length, periodTasks }
+}
+
 function DonutChart({ segments, size = 120, strokeWidth = 13, children }) {
   const r = (size - strokeWidth) / 2
   const circ = 2 * Math.PI * r
@@ -435,48 +477,79 @@ function DonutChart({ segments, size = 120, strokeWidth = 13, children }) {
   )
 }
 
-function exportPDF(stats, tasks) {
+function exportPDF(stats, periodLabel) {
   const doc = new jsPDF()
-  const today = new Date().toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
+  const pageW = doc.internal.pageSize.getWidth()
+  const generated = new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' })
+  const donePct = Math.round((stats.doneCount / (stats.totalCount || 1)) * 100)
+  const okPct = Math.round(((stats.onTime + stats.early) / (stats.total || 1)) * 100)
+  const latePct = Math.round((stats.late / (stats.total || 1)) * 100)
+  const plannedH = Math.round(stats.plannedMins / 60 * 10) / 10
+  const actualH = Math.round(stats.actualMins / 60 * 10) / 10
 
-  doc.setFontSize(18)
-  doc.setFont('helvetica', 'bold')
-  doc.text('Task Report', 14, 20)
-  doc.setFontSize(10)
-  doc.setFont('helvetica', 'normal')
-  doc.setTextColor(150)
-  doc.text(`Generated on ${today}`, 14, 28)
-  doc.setTextColor(0)
+  // ── Header ────────────────────────────────────────────
+  doc.setFillColor(30, 41, 59)
+  doc.rect(0, 0, pageW, 42, 'F')
+  doc.setTextColor(255, 255, 255)
+  doc.setFontSize(20); doc.setFont('helvetica', 'bold')
+  doc.text('Task Report', 14, 17)
+  doc.setFontSize(9); doc.setFont('helvetica', 'normal')
+  doc.setTextColor(148, 163, 184)
+  doc.text(periodLabel, 14, 26)
+  doc.text(`Generated ${generated}`, 14, 33)
 
-  doc.setFontSize(12)
-  doc.setFont('helvetica', 'bold')
-  doc.text('Weekly Summary', 14, 42)
-
-  autoTable(doc, {
-    startY: 47,
-    head: [['Metric', 'Value']],
-    body: [
-      ['Tasks completed', `${stats.doneCount} / ${stats.totalCount}`],
-      ['On time', `${stats.onTime} tasks`],
-      ['Early', `${stats.early} tasks`],
-      ['Late', `${stats.late} tasks`],
-      ['Hours planned', `${Math.round(stats.plannedMins / 60 * 10) / 10}h`],
-      ['Hours actual', `${Math.round(stats.actualMins / 60 * 10) / 10}h`],
-    ],
-    theme: 'striped',
-    headStyles: { fillColor: [55, 138, 221] },
-    columnStyles: { 0: { fontStyle: 'bold' } },
+  // ── Stat cards ────────────────────────────────────────
+  const cards = [
+    { label: 'COMPLETED', value: `${stats.doneCount} / ${stats.totalCount}`, sub: `${donePct}%`, color: [16, 140, 100] },
+    { label: 'ON TIME + EARLY', value: `${stats.onTime + stats.early}`, sub: `${okPct}% of timed`, color: [37, 99, 195] },
+    { label: 'LATE', value: `${stats.late}`, sub: `${latePct}% of timed`, color: [185, 28, 28] },
+    { label: 'HOURS', value: `${actualH}h`, sub: `planned ${plannedH}h`, color: [109, 76, 185] },
+  ]
+  const cW = (pageW - 28 - 9) / 4
+  cards.forEach((c, i) => {
+    const x = 14 + i * (cW + 3)
+    doc.setFillColor(...c.color)
+    doc.roundedRect(x, 50, cW, 30, 2, 2, 'F')
+    doc.setFillColor(255, 255, 255, 0.15)
+    doc.setTextColor(255, 255, 255)
+    doc.setFontSize(6.5); doc.setFont('helvetica', 'bold')
+    doc.text(c.label, x + 4, 58)
+    doc.setFontSize(15); doc.setFont('helvetica', 'bold')
+    doc.text(c.value, x + 4, 68)
+    doc.setFontSize(7.5); doc.setFont('helvetica', 'normal')
+    doc.setTextColor(220, 220, 220)
+    doc.text(c.sub, x + 4, 75)
   })
 
-  const y = doc.lastAutoTable.finalY + 14
-  doc.setFontSize(12)
-  doc.setFont('helvetica', 'bold')
-  doc.text('All Tasks', 14, y)
+  // ── Performance bar ───────────────────────────────────
+  doc.setTextColor(30, 41, 59)
+  doc.setFontSize(10); doc.setFont('helvetica', 'bold')
+  doc.text('Time Performance', 14, 95)
+  const barTotal = stats.early + stats.onTime + stats.late || 1
+  const bW = pageW - 28
+  const earlyW = (stats.early / barTotal) * bW
+  const onW = (stats.onTime / barTotal) * bW
+  const lateW = (stats.late / barTotal) * bW
+  doc.setFillColor(37, 99, 195); doc.roundedRect(14, 98, earlyW || 0.1, 7, 1, 1, 'F')
+  doc.setFillColor(16, 140, 100); doc.roundedRect(14 + earlyW, 98, onW || 0.1, 7, 1, 1, 'F')
+  doc.setFillColor(185, 28, 28); doc.roundedRect(14 + earlyW + onW, 98, lateW || 0.1, 7, 1, 1, 'F')
+  doc.setFontSize(8); doc.setFont('helvetica', 'normal')
+  doc.setTextColor(37, 99, 195); doc.text(`● Early: ${stats.early}`, 14, 112)
+  doc.setTextColor(16, 140, 100); doc.text(`● On time: ${stats.onTime}`, 55, 112)
+  doc.setTextColor(185, 28, 28); doc.text(`● Late: ${stats.late}`, 100, 112)
+
+  // ── Tasks table ───────────────────────────────────────
+  doc.setTextColor(30, 41, 59)
+  doc.setFontSize(10); doc.setFont('helvetica', 'bold')
+  doc.text('Tasks', 14, 122)
+
+  const statusColor = { done: [16, 140, 100], overdue: [185, 28, 28], today: [161, 81, 15], upcoming: [30, 100, 150] }
+  const resultColor = { 'On time': [16, 140, 100], 'Early': [37, 99, 195], 'Late': [185, 28, 28] }
 
   autoTable(doc, {
-    startY: y + 5,
-    head: [['Task', 'Project', 'Status', 'Date', 'Estimated', 'Actual', 'Result']],
-    body: tasks.map(t => [
+    startY: 126,
+    head: [['Task', 'Project', 'Status', 'Date', 'Est.', 'Actual', 'Result']],
+    body: stats.periodTasks.map(t => [
       t.name,
       t.proj || '—',
       t.status,
@@ -485,47 +558,113 @@ function exportPDF(stats, tasks) {
       t.actual_minutes ? formatMins(t.actual_minutes) : '—',
       t.time_result ? RESULT_STYLE[t.time_result].label : '—',
     ]),
-    theme: 'striped',
-    headStyles: { fillColor: [55, 138, 221] },
-    styles: { fontSize: 9 },
+    theme: 'grid',
+    headStyles: { fillColor: [30, 41, 59], fontSize: 8, fontStyle: 'bold', textColor: 255 },
+    bodyStyles: { fontSize: 8, textColor: [30, 41, 59] },
+    alternateRowStyles: { fillColor: [248, 249, 252] },
+    columnStyles: { 0: { cellWidth: 'auto' }, 2: { cellWidth: 22 }, 6: { cellWidth: 22 } },
+    didParseCell: data => {
+      if (data.section !== 'body') return
+      if (data.column.index === 2) {
+        const c = statusColor[data.cell.raw] || [80, 80, 80]
+        data.cell.styles.textColor = c; data.cell.styles.fontStyle = 'bold'
+      }
+      if (data.column.index === 6 && resultColor[data.cell.raw]) {
+        data.cell.styles.textColor = resultColor[data.cell.raw]; data.cell.styles.fontStyle = 'bold'
+      }
+    },
   })
 
-  doc.save('task-report.pdf')
+  doc.save(`task-report-${periodLabel.replace(/\s/g,'-').toLowerCase()}.pdf`)
 }
 
-function exportExcel(tasks) {
-  const data = tasks.map(t => ({
-    Task: t.name,
-    Project: t.proj || '',
-    Status: t.status,
-    Date: t.date || '',
-    'Start time': t.start_time || '',
-    'End time': t.end_time || '',
-    'Estimated (min)': t.estimated_minutes || '',
-    'Actual (min)': t.actual_minutes || '',
-    Result: t.time_result ? RESULT_STYLE[t.time_result].label : '',
-  }))
-  const ws = XLSX.utils.json_to_sheet(data)
+function exportExcel(stats, periodLabel) {
   const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, ws, 'Tasks')
-  XLSX.writeFile(wb, 'task-report.xlsx')
+  const generated = new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' })
+  const donePct = Math.round((stats.doneCount / (stats.totalCount || 1)) * 100)
+  const plannedH = Math.round(stats.plannedMins / 60 * 10) / 10
+  const actualH = Math.round(stats.actualMins / 60 * 10) / 10
+
+  // ── Sheet 1: Summary ─────────────────────────────────
+  const summaryData = [
+    ['TASK REPORT', ''],
+    ['Period', periodLabel],
+    ['Generated', generated],
+    ['', ''],
+    ['COMPLETION', ''],
+    ['Total tasks', stats.totalCount],
+    ['Completed', stats.doneCount],
+    ['Completion rate', `${donePct}%`],
+    ['', ''],
+    ['TIME PERFORMANCE', ''],
+    ['Early', stats.early],
+    ['On time', stats.onTime],
+    ['Late', stats.late],
+    ['Ok rate', `${Math.round(((stats.onTime + stats.early) / (stats.total || 1)) * 100)}%`],
+    ['', ''],
+    ['HOURS', ''],
+    ['Planned', `${plannedH}h`],
+    ['Actual', `${actualH}h`],
+    ['Delta', `${actualH >= plannedH ? '+' : ''}${Math.round((actualH - plannedH) * 10) / 10}h`],
+  ]
+  const wsSummary = XLSX.utils.aoa_to_sheet(summaryData)
+  wsSummary['!cols'] = [{ wch: 22 }, { wch: 20 }]
+  XLSX.utils.book_append_sheet(wb, wsSummary, 'Summary')
+
+  // ── Sheet 2: Tasks ────────────────────────────────────
+  const header = ['Task', 'Project', 'Status', 'Date', 'Start', 'End', 'Estimated (min)', 'Actual (min)', 'Result']
+  const rows = stats.periodTasks.map(t => [
+    t.name,
+    t.proj || '',
+    t.status,
+    t.date || '',
+    t.start_time ? t.start_time.slice(0, 5) : '',
+    t.end_time ? t.end_time.slice(0, 5) : '',
+    t.estimated_minutes || '',
+    t.actual_minutes || '',
+    t.time_result ? RESULT_STYLE[t.time_result].label : '',
+  ])
+  const wsTasks = XLSX.utils.aoa_to_sheet([header, ...rows])
+  wsTasks['!cols'] = [{ wch: 36 }, { wch: 20 }, { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 15 }, { wch: 13 }, { wch: 12 }]
+  wsTasks['!autofilter'] = { ref: `A1:I1` }
+  XLSX.utils.book_append_sheet(wb, wsTasks, 'Tasks')
+
+  XLSX.writeFile(wb, `task-report-${periodLabel.replace(/\s/g, '-').toLowerCase()}.xlsx`)
 }
 
-function DashboardView({ stats, tasks }) {
+function DashboardView({ tasks }) {
+  const [period, setPeriod] = useState('week')
+  const [customFrom, setCustomFrom] = useState('')
+  const [customTo, setCustomTo] = useState('')
+
+  const stats = getStats(tasks, period, customFrom, customTo)
+  const periodLabel = getPeriodLabel(period, customFrom, customTo)
   const donePct = Math.round((stats.doneCount / (stats.totalCount || 1)) * 100)
   const pct = (n) => Math.round((n / (stats.total || 1)) * 100)
-  const recentDone = tasks.filter(t => t.status === 'done' && t.time_result).slice(-10).reverse()
   const overPct = stats.plannedMins > 0 ? Math.round((stats.actualMins - stats.plannedMins) / stats.plannedMins * 100) : 0
+  const recentDone = stats.periodTasks.filter(t => t.status === 'done' && t.time_result).slice(-10).reverse()
 
   return (
     <div className="dashboard">
       <div className="dash-header">
-        <div className="dash-section-title">This week</div>
+        <div className="period-tabs">
+          {PERIODS.map(p => (
+            <button key={p.value} className={`period-tab${period === p.value ? ' active' : ''}`} onClick={() => setPeriod(p.value)}>{p.label}</button>
+          ))}
+        </div>
         <div className="dash-export-btns">
-          <button className="export-btn" onClick={() => exportPDF(stats, tasks)}>↓ PDF</button>
-          <button className="export-btn excel" onClick={() => exportExcel(tasks)}>↓ Excel</button>
+          <button className="export-btn" onClick={() => exportPDF(stats, periodLabel)}>↓ PDF</button>
+          <button className="export-btn excel" onClick={() => exportExcel(stats, periodLabel)}>↓ Excel</button>
         </div>
       </div>
+
+      {period === 'custom' && (
+        <div className="custom-range">
+          <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)} />
+          <span style={{ color:'#aaa' }}>—</span>
+          <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)} />
+        </div>
+      )}
 
       <div className="dash-rings">
         <div className="dash-ring-card">

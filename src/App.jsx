@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from './supabase'
-import jsPDF from 'jspdf'
+import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import * as XLSX from 'xlsx'
 import './App.css'
@@ -479,75 +479,64 @@ function DonutChart({ segments, size = 120, strokeWidth = 13, children }) {
 
 function exportPDF(stats, periodLabel) {
   const doc = new jsPDF()
-  const pageW = doc.internal.pageSize.getWidth()
   const generated = new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' })
   const donePct = Math.round((stats.doneCount / (stats.totalCount || 1)) * 100)
   const okPct = Math.round(((stats.onTime + stats.early) / (stats.total || 1)) * 100)
   const latePct = Math.round((stats.late / (stats.total || 1)) * 100)
   const plannedH = Math.round(stats.plannedMins / 60 * 10) / 10
   const actualH = Math.round(stats.actualMins / 60 * 10) / 10
+  const deltaH = Math.round((actualH - plannedH) * 10) / 10
+  const SC = { done:[16,140,100], overdue:[185,28,28], today:[161,81,15], upcoming:[30,100,150] }
+  const RC = { 'On time':[16,140,100], 'Early':[37,99,195], 'Late':[185,28,28] }
 
-  // ── Header ────────────────────────────────────────────
-  doc.setFillColor(30, 41, 59)
-  doc.rect(0, 0, pageW, 42, 'F')
-  doc.setTextColor(255, 255, 255)
-  doc.setFontSize(20); doc.setFont('helvetica', 'bold')
-  doc.text('Task Report', 14, 17)
-  doc.setFontSize(9); doc.setFont('helvetica', 'normal')
-  doc.setTextColor(148, 163, 184)
-  doc.text(periodLabel, 14, 26)
-  doc.text(`Generated ${generated}`, 14, 33)
-
-  // ── Stat cards ────────────────────────────────────────
-  const cards = [
-    { label: 'COMPLETED', value: `${stats.doneCount} / ${stats.totalCount}`, sub: `${donePct}%`, color: [16, 140, 100] },
-    { label: 'ON TIME + EARLY', value: `${stats.onTime + stats.early}`, sub: `${okPct}% of timed`, color: [37, 99, 195] },
-    { label: 'LATE', value: `${stats.late}`, sub: `${latePct}% of timed`, color: [185, 28, 28] },
-    { label: 'HOURS', value: `${actualH}h`, sub: `planned ${plannedH}h`, color: [109, 76, 185] },
-  ]
-  const cW = (pageW - 28 - 9) / 4
-  cards.forEach((c, i) => {
-    const x = 14 + i * (cW + 3)
-    doc.setFillColor(...c.color)
-    doc.roundedRect(x, 50, cW, 30, 2, 2, 'F')
-    doc.setFillColor(255, 255, 255, 0.15)
-    doc.setTextColor(255, 255, 255)
-    doc.setFontSize(6.5); doc.setFont('helvetica', 'bold')
-    doc.text(c.label, x + 4, 58)
-    doc.setFontSize(15); doc.setFont('helvetica', 'bold')
-    doc.text(c.value, x + 4, 68)
-    doc.setFontSize(7.5); doc.setFont('helvetica', 'normal')
-    doc.setTextColor(220, 220, 220)
-    doc.text(c.sub, x + 4, 75)
+  // ── 1. Header ─────────────────────────────────────────────────
+  autoTable(doc, {
+    startY: 0,
+    body: [
+      [{ content: 'TASK REPORT', styles: { fontSize: 18, fontStyle: 'bold', textColor: [255,255,255] } },
+       { content: periodLabel, styles: { fontSize: 10, textColor: [148,163,184], halign: 'right', valign: 'bottom' } }],
+      [{ content: `Generated on ${generated}`, colSpan: 2, styles: { fontSize: 8, textColor: [100,130,160] } }],
+    ],
+    theme: 'plain',
+    styles: { fillColor: [30,41,59], cellPadding: { top:5, bottom:4, left:12, right:12 } },
+    margin: { left:0, right:0 },
+    tableWidth: 'auto',
   })
 
-  // ── Performance bar ───────────────────────────────────
-  doc.setTextColor(30, 41, 59)
-  doc.setFontSize(10); doc.setFont('helvetica', 'bold')
-  doc.text('Time Performance', 14, 95)
-  const barTotal = stats.early + stats.onTime + stats.late || 1
-  const bW = pageW - 28
-  const earlyW = (stats.early / barTotal) * bW
-  const onW = (stats.onTime / barTotal) * bW
-  const lateW = (stats.late / barTotal) * bW
-  doc.setFillColor(37, 99, 195); doc.roundedRect(14, 98, earlyW || 0.1, 7, 1, 1, 'F')
-  doc.setFillColor(16, 140, 100); doc.roundedRect(14 + earlyW, 98, onW || 0.1, 7, 1, 1, 'F')
-  doc.setFillColor(185, 28, 28); doc.roundedRect(14 + earlyW + onW, 98, lateW || 0.1, 7, 1, 1, 'F')
-  doc.setFontSize(8); doc.setFont('helvetica', 'normal')
-  doc.setTextColor(37, 99, 195); doc.text(`● Early: ${stats.early}`, 14, 112)
-  doc.setTextColor(16, 140, 100); doc.text(`● On time: ${stats.onTime}`, 55, 112)
-  doc.setTextColor(185, 28, 28); doc.text(`● Late: ${stats.late}`, 100, 112)
-
-  // ── Tasks table ───────────────────────────────────────
-  doc.setTextColor(30, 41, 59)
-  doc.setFontSize(10); doc.setFont('helvetica', 'bold')
-  doc.text('Tasks', 14, 122)
-
-  const statusColor = { done: [16, 140, 100], overdue: [185, 28, 28], today: [161, 81, 15], upcoming: [30, 100, 150] }
-  const resultColor = { 'On time': [16, 140, 100], 'Early': [37, 99, 195], 'Late': [185, 28, 28] }
-
+  // ── 2. KPI cards ──────────────────────────────────────────────
   autoTable(doc, {
-    startY: 126,
+    startY: doc.lastAutoTable.finalY + 8,
+    head: [['COMPLETED','ON TIME + EARLY','LATE','HOURS']],
+    body: [[
+      { content: `${stats.doneCount} / ${stats.totalCount}\n${donePct}%`, styles: { textColor: [16,140,100] } },
+      { content: `${stats.onTime + stats.early} tasks\n${okPct}% of timed`, styles: { textColor: [37,99,195] } },
+      { content: `${stats.late} tasks\n${latePct}% of timed`, styles: { textColor: [185,28,28] } },
+      { content: `${actualH}h actual\n${plannedH}h planned  (${deltaH >= 0 ? '+' : ''}${deltaH}h)`, styles: { textColor: [109,76,185] } },
+    ]],
+    theme: 'grid',
+    headStyles: { fillColor: [51,65,85], textColor: [255,255,255], fontSize: 7.5, fontStyle: 'bold', halign: 'center', cellPadding: 4 },
+    bodyStyles: { fontSize: 9.5, fontStyle: 'bold', halign: 'center', cellPadding: 6, minCellHeight: 16 },
+    margin: { left:14, right:14 },
+  })
+
+  // ── 3. Performance breakdown ───────────────────────────────────
+  autoTable(doc, {
+    startY: doc.lastAutoTable.finalY + 8,
+    head: [['TIME PERFORMANCE', '', '']],
+    body: [[
+      { content: `Early\n${stats.early} tasks`, styles: { textColor: [37,99,195], fontStyle: 'bold' } },
+      { content: `On time\n${stats.onTime} tasks`, styles: { textColor: [16,140,100], fontStyle: 'bold' } },
+      { content: `Late\n${stats.late} tasks`, styles: { textColor: [185,28,28], fontStyle: 'bold' } },
+    ]],
+    theme: 'grid',
+    headStyles: { fillColor: [51,65,85], textColor: [255,255,255], fontSize: 7.5, fontStyle: 'bold', colSpan: 3, halign: 'left', cellPadding: 4 },
+    bodyStyles: { fontSize: 9, halign: 'center', cellPadding: 5, minCellHeight: 12 },
+    margin: { left:14, right:14 },
+  })
+
+  // ── 4. Task list ───────────────────────────────────────────────
+  autoTable(doc, {
+    startY: doc.lastAutoTable.finalY + 8,
     head: [['Task', 'Project', 'Status', 'Date', 'Est.', 'Actual', 'Result']],
     body: stats.periodTasks.map(t => [
       t.name,
@@ -558,57 +547,57 @@ function exportPDF(stats, periodLabel) {
       t.actual_minutes ? formatMins(t.actual_minutes) : '—',
       t.time_result ? RESULT_STYLE[t.time_result].label : '—',
     ]),
-    theme: 'grid',
-    headStyles: { fillColor: [30, 41, 59], fontSize: 8, fontStyle: 'bold', textColor: 255 },
-    bodyStyles: { fontSize: 8, textColor: [30, 41, 59] },
-    alternateRowStyles: { fillColor: [248, 249, 252] },
-    columnStyles: { 0: { cellWidth: 'auto' }, 2: { cellWidth: 22 }, 6: { cellWidth: 22 } },
+    theme: 'striped',
+    headStyles: { fillColor: [30,41,59], textColor: [255,255,255], fontSize: 8, fontStyle: 'bold' },
+    bodyStyles: { fontSize: 8, textColor: [30,41,59] },
+    alternateRowStyles: { fillColor: [246,248,252] },
+    columnStyles: { 2: { cellWidth: 22 }, 3: { cellWidth: 18 }, 4: { cellWidth: 16 }, 5: { cellWidth: 16 }, 6: { cellWidth: 20 } },
     didParseCell: data => {
       if (data.section !== 'body') return
-      if (data.column.index === 2) {
-        const c = statusColor[data.cell.raw] || [80, 80, 80]
-        data.cell.styles.textColor = c; data.cell.styles.fontStyle = 'bold'
-      }
-      if (data.column.index === 6 && resultColor[data.cell.raw]) {
-        data.cell.styles.textColor = resultColor[data.cell.raw]; data.cell.styles.fontStyle = 'bold'
-      }
+      if (data.column.index === 2 && SC[data.cell.raw]) { data.cell.styles.textColor = SC[data.cell.raw]; data.cell.styles.fontStyle = 'bold' }
+      if (data.column.index === 6 && RC[data.cell.raw]) { data.cell.styles.textColor = RC[data.cell.raw]; data.cell.styles.fontStyle = 'bold' }
     },
+    margin: { left:14, right:14 },
   })
 
-  doc.save(`task-report-${periodLabel.replace(/\s/g,'-').toLowerCase()}.pdf`)
+  doc.save(`task-report-${periodLabel.replace(/[^a-z0-9]/gi,'-').toLowerCase()}.pdf`)
 }
 
 function exportExcel(stats, periodLabel) {
   const wb = XLSX.utils.book_new()
   const generated = new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' })
   const donePct = Math.round((stats.doneCount / (stats.totalCount || 1)) * 100)
+  const okPct = Math.round(((stats.onTime + stats.early) / (stats.total || 1)) * 100)
+  const latePct = Math.round((stats.late / (stats.total || 1)) * 100)
   const plannedH = Math.round(stats.plannedMins / 60 * 10) / 10
   const actualH = Math.round(stats.actualMins / 60 * 10) / 10
+  const deltaH = actualH - plannedH
 
-  // ── Sheet 1: Summary ─────────────────────────────────
+  // ── Sheet 1: Summary ──────────────────────────────────
   const summaryData = [
-    ['TASK REPORT', ''],
-    ['Period', periodLabel],
-    ['Generated', generated],
+    ['TASK REPORT — ' + periodLabel, ''],
+    ['Generated on', generated],
     ['', ''],
-    ['COMPLETION', ''],
-    ['Total tasks', stats.totalCount],
+    ['── COMPLETION ──────────────────', ''],
+    ['Total tasks in period', stats.totalCount],
     ['Completed', stats.doneCount],
+    ['Remaining', stats.totalCount - stats.doneCount],
     ['Completion rate', `${donePct}%`],
     ['', ''],
-    ['TIME PERFORMANCE', ''],
+    ['── TIME PERFORMANCE ────────────', ''],
     ['Early', stats.early],
     ['On time', stats.onTime],
     ['Late', stats.late],
-    ['Ok rate', `${Math.round(((stats.onTime + stats.early) / (stats.total || 1)) * 100)}%`],
+    ['On time or early', `${okPct}%`],
+    ['Late rate', `${latePct}%`],
     ['', ''],
-    ['HOURS', ''],
-    ['Planned', `${plannedH}h`],
-    ['Actual', `${actualH}h`],
-    ['Delta', `${actualH >= plannedH ? '+' : ''}${Math.round((actualH - plannedH) * 10) / 10}h`],
+    ['── HOURS ───────────────────────', ''],
+    ['Planned', plannedH],
+    ['Actual', actualH],
+    ['Delta (actual - planned)', `${deltaH >= 0 ? '+' : ''}${Math.round(deltaH * 10) / 10}h`],
   ]
   const wsSummary = XLSX.utils.aoa_to_sheet(summaryData)
-  wsSummary['!cols'] = [{ wch: 22 }, { wch: 20 }]
+  wsSummary['!cols'] = [{ wch: 34 }, { wch: 18 }]
   XLSX.utils.book_append_sheet(wb, wsSummary, 'Summary')
 
   // ── Sheet 2: Tasks ────────────────────────────────────
@@ -620,16 +609,16 @@ function exportExcel(stats, periodLabel) {
     t.date || '',
     t.start_time ? t.start_time.slice(0, 5) : '',
     t.end_time ? t.end_time.slice(0, 5) : '',
-    t.estimated_minutes || '',
-    t.actual_minutes || '',
+    t.estimated_minutes != null ? t.estimated_minutes : '',
+    t.actual_minutes != null ? t.actual_minutes : '',
     t.time_result ? RESULT_STYLE[t.time_result].label : '',
   ])
   const wsTasks = XLSX.utils.aoa_to_sheet([header, ...rows])
-  wsTasks['!cols'] = [{ wch: 36 }, { wch: 20 }, { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 15 }, { wch: 13 }, { wch: 12 }]
+  wsTasks['!cols'] = [{ wch: 38 }, { wch: 22 }, { wch: 12 }, { wch: 13 }, { wch: 8 }, { wch: 8 }, { wch: 16 }, { wch: 14 }, { wch: 12 }]
   wsTasks['!autofilter'] = { ref: `A1:I1` }
   XLSX.utils.book_append_sheet(wb, wsTasks, 'Tasks')
 
-  XLSX.writeFile(wb, `task-report-${periodLabel.replace(/\s/g, '-').toLowerCase()}.xlsx`)
+  XLSX.writeFile(wb, `task-report-${periodLabel.replace(/[^a-z0-9]/gi, '-').toLowerCase()}.xlsx`)
 }
 
 function DashboardView({ tasks }) {
